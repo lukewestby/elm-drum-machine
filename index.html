@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title></title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Noto+Sans:400,700" />
+  </head>
+  <body>
+    <a href="https://github.com/lukewestby/elm-drum-machine"><img style="position: absolute; top: 0; right: 0; border: 0;" src="https://camo.githubusercontent.com/38ef81f8aca64bb9a64448d0d70f1308ef5341ab/68747470733a2f2f73332e616d617a6f6e6177732e636f6d2f6769746875622f726962626f6e732f666f726b6d655f72696768745f6461726b626c75655f3132313632312e706e67" alt="Fork me on GitHub" data-canonical-src="https://s3.amazonaws.com/github/ribbons/forkme_right_darkblue_121621.png"></a>
+    <script src="build/main.js"></script>
+    <script>
+      const app = Elm.DrumMachine.fullscreen();
+
+      app.ports.logExternalOut.subscribe((value) => {
+        console.info("logs:", value);
+      });
+
+      const elmAppOnProgress = (app, progress) => {
+        app.ports.loadProgressEvents.send(progress)
+      };
+
+      const elmAppOnComplete = (app) => {
+        app.ports.loadSuccessEvent.send({});
+      };
+
+      const elmAppOnFailure = (app) => {
+        app.ports.loadFailureEvent.send({});
+      };
+
+      Object.values = Object.values || (obj) => {
+        return Object.keys(obj).map((key) => obj[key]);
+      };
+
+      const context = new AudioContext();
+
+      const loadFile = (url, onComplete, onError, onProgress) => {
+        const request = new XMLHttpRequest();
+        request.open('GET', url, true);
+        request.responseType = 'arraybuffer';
+        request.addEventListener('load', () => {
+          context.decodeAudioData(request.response, onComplete, onError);
+        });
+        request.addEventListener('progress', onProgress);
+        request.addEventListener('error', onError);
+        request.send();
+      };
+
+      const playSound = (context, buffer) => {
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        source.connect(context.destination);
+        source.start(0);
+      };
+
+      const instrumentTypesMap = {
+        'Kick': 'audio/kick.wav',
+        'Snare': 'audio/snare.wav',
+        'Clap': 'audio/clap.wav',
+        'ClosedHat': 'audio/closed-hat.wav',
+        'OpenHat': 'audio/open-hat.wav',
+      };
+
+      const allFiles = Object.values(instrumentTypesMap);
+      const fileLoadedMap = {};
+      const fileBufferMap = {};
+      let loadedCount = 0;
+
+      allFiles.forEach((file) => {
+        loadFile(
+          file,
+          (buffer) => {
+            fileBufferMap[file] = buffer;
+            loadedCount += 1;
+            if (loadedCount === allFiles.length) {
+              elmAppOnComplete(app);
+            }
+          },
+          () => {
+            elmAppOnFailure(app);
+          },
+          (ev) => {
+            fileLoadedMap[file] || (fileLoadedMap[file] = 0);
+            fileLoadedMap[file] = (ev.loaded / ev.total);
+            const loadProgress = Object.values(fileLoadedMap).reduce((sum, next) => sum + next, 0) / allFiles.length;
+            elmAppOnProgress(app, loadProgress);
+          }
+        );
+      });
+
+      app.ports.playSoundOut.subscribe(({ currentSlotIndex, tracks }) => {
+        tracks.forEach((track) => {
+          const currentSlot = track.slots[currentSlotIndex];
+          const instrument = track.instrument;
+          if (!currentSlot.enabled) {
+            return;
+          }
+
+          const fileName = instrumentTypesMap[instrument];
+          if (!fileName) {
+            return;
+          }
+
+          playSound(context, fileBufferMap[fileName]);
+        });
+      });
+    </script>
+  </body>
+</html>
